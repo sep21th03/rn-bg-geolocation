@@ -1,0 +1,51 @@
+{
+  "name": "rn-bg-geolocation",
+  "version": "0.1.8",
+  "description": "Free background geolocation for React Native (Android + iOS): motion-aware tracking, geofencing, SQLite queue, HTTP sync. API-compatible with react-native-background-geolocation, no license key.",
+  "main": "index.js",
+  "react-native": "index.js",
+  "types": "types.d.ts",
+  "license": "MIT",
+  "author": "sep21th <sep21th03@gmail.com>",
+  "homepage": "https://github.com/sep21th03/rn-bg-geolocation#readme",
+  "bugs": {
+    "url": "https://github.com/sep21th03/rn-bg-geolocation/issues"
+  },
+  "keywords": [
+    "react-native",
+    "ios",
+    "android",
+    "geolocation",
+    "background-geolocation",
+    "background-location",
+    "location",
+    "tracking",
+    "geofence",
+    "geofencing",
+    "foreground-service",
+    "motion-detection"
+  ],
+  "files": [
+    "index.js",
+    "types.d.ts",
+    "android/src/main",
+    "android/build.gradle",
+    "ios",
+    "rn-bg-geolocation.podspec",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "echo \"no JS tests\" && exit 0",
+    "prepack": "node --check index.js"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.71.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sep21th03/rn-bg-geolocation"
+  }
+}

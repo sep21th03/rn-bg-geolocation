@@ -378,7 +378,18 @@ class BgGeoModule(private val reactCtx: ReactApplicationContext) :
         val arr = JSONArray(Prefs.geofences(ctx()).toString())
         val out = ArrayList<JSONObject>()
         for (i in 0 until list.size()) {
-            val j = toJson(list.getMap(i)!!).apply {
+            // KHÔNG dùng `list.getMap(i)!!`: phần tử không phải object (null / undefined / số)
+            // sẽ ném NullPointerException và LÀM CHẾT APP. Từ chối bằng promise.reject để app
+            // tự xử lý (JS ở iOS không có vấn đề này vì `as? [String: Any]` chỉ trả nil).
+            val item = list.getMap(i)
+            if (item == null) {
+                promise.reject(
+                    "E_GEOFENCE",
+                    "vùng #$i không phải object (nhận ${list.getType(i).toString().lowercase()})"
+                )
+                return
+            }
+            val j = toJson(item).apply {
                 if (!has("identifier") || optString("identifier").isEmpty()) put("identifier", Util.uuid())
             }
             validateGeofence(j)?.let { msg ->

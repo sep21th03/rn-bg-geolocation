@@ -1844,9 +1844,18 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
         resolve(jsonString([
             "platform": "ios",
             "model": d.model,
+            // `name` PHẢI TRÙNG ĐÚNG giá trị gửi lên server trong `device_name`
+            // (BgGeo.deviceDisplayName = "iPhone" / "iPhone (Simulator)").
+            // Trước đây trả `d.name` (tên người dùng đặt, ví dụ "iPhone của Hoa") → app đóng dấu
+            // tên KHÁC với tên trong bản ghi vị trí của cùng một device_id ⇒ server hiện 2 tên
+            // cho cùng một máy. Sửa 27/10/2026.
+            "name": BgGeo.deviceDisplayName,
             "manufacturer": "Apple",
             "version": d.systemVersion,
-            "name": d.name,
+            // ⚠️ KHÔNG khai lại "name" ở đây: Swift TRAP khi dictionary literal trùng khoá
+            // (`Fatal error: Dictionary literal contains duplicate keys`, SIGTRAP) — đã gây crash
+            // thật 23 lần (27/10 14:08 → 28/10 07:41) ngay khi app gọi getDeviceInfo lúc khởi động.
+            // Dòng `"name": d.name` cũ đã bị thay bằng `"name": BgGeo.deviceDisplayName` ở trên.
             // Mã ổn định đúng là mã đang gửi lên server (xem stableDeviceId()).
             "device_id": BgGeo.stableDeviceId(),
             "identifierForVendor": d.identifierForVendor?.uuidString ?? "",

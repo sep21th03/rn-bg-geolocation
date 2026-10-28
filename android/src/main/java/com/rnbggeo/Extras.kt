@@ -170,6 +170,12 @@ object DeviceInfo {
     fun json(ctx: Context): JSONObject = JSONObject().apply {
         put("platform", "android")
         put("model", Build.MODEL)
+        // `name` PHẢI TRÙNG ĐÚNG giá trị đang gửi lên server trong `device_name` của mọi bản ghi
+        // (location / diag / geofence) — xem Util.DeviceId.name() = Build.MODEL.
+        // App đọc field này để đóng dấu tên máy vào bản ghi chấm công. Thiếu nó (đã xảy ra thật
+        // 27/10/2026): app gửi device_name rỗng nên bảng chấm công phải hiện mã máy thay vì tên
+        // máy (SM-A066B), trong khi /devices vẫn biết tên → hai nguồn lệch nhau.
+        put("name", Util.DeviceId.name())
         put("manufacturer", Build.MANUFACTURER)
         put("version", Build.VERSION.RELEASE)
         put("sdk", Build.VERSION.SDK_INT)

@@ -577,6 +577,13 @@ export interface ScheduleInfo {
 
 export interface DeviceInfo {
   platform: string;
+  /**
+   * Tên thiết bị **đang dùng làm `device_name` gửi lên server** (Android: `Build.MODEL` như
+   * `SM-A066B`; iOS: `UIDevice.model` như `iPhone`, giả lập: `iPhone (Simulator)`).
+   * Dùng field này khi app tự đóng dấu tên máy vào dữ liệu riêng để khớp với bản ghi vị trí.
+   * (Trước 0.1.9: Android không trả `name`, iOS trả tên người dùng đặt → lệch nhau.)
+   */
+  name: string;
   model: string;
   manufacturer: string;
   version: string;

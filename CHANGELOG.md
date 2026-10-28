@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.9 — `DeviceInfo.name` khớp `device_name` (cả 2 nền tảng) + chống chết app khi JS truyền sai
+
+**Yêu cầu:** app cần biết **tên máy** để đóng dấu vào dữ liệu riêng (bảng chấm công) sao cho trùng
+đúng tên lib gửi lên server (`device_name`); và lib **không được làm chết app** khi JS truyền sai.
+
+**Nay:**
+
+- `getDeviceInfo()` trả thêm `name` = **đúng giá trị đang gửi làm `device_name`**:
+  Android `Build.MODEL` (vd `SM-A066B`), iOS `UIDevice.model` (vd `iPhone`, giả lập
+  `iPhone (Simulator)`). Trước đây Android **không có** `name` (⇒ app phải tự đoán), còn iOS trả
+  `UIDevice.name` — tên người dùng đặt (vd "iPhone của Hoa") ⇒ **cùng một máy mà server thấy 2 tên**.
+- `addGeofences(list)` (Android): phần tử không phải object (`null` / `undefined` / số) nay
+  `promise.reject('E_GEOFENCE', 'vùng #i không phải object (nhận …)')` thay vì ném
+  NullPointerException **làm chết app**. (iOS vốn an toàn vì `as? [String: Any]` chỉ trả nil.)
+
+**Lưu ý cho người bảo trì:** dictionary literal trong Swift **không được trùng khoá** — trùng thì
+nổ `Fatal error: Dictionary literal contains duplicate keys` (SIGTRAP) **lúc chạy**, dù build vẫn
+xanh và `swiftc -parse` sạch. Sửa `getDeviceInfo()`/`getSensors()` xong phải chạy thật, không tin
+build. (Kotlin/`JSONObject.put` thì trùng khoá chỉ ghi đè, không trap.)
+
 ## 0.1.8 — Chế độ CHẤM CÔNG: tắt "viền xanh", đứng yên tắt hẳn GPS (pin trước, như lib gốc)
 
 **Yêu cầu:** app chỉ cần **chấm công vùng** (ENTER/EXIT geofence), **không** cần vẽ hành trình liền

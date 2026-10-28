@@ -1,6 +1,6 @@
 {
   "name": "rn-bg-geolocation",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Free background geolocation for React Native (Android + iOS): motion-aware tracking, geofencing, SQLite queue, HTTP sync. API-compatible with react-native-background-geolocation, no license key.",
   "main": "index.js",
   "react-native": "index.js",

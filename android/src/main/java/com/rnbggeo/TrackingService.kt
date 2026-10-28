@@ -1147,9 +1147,15 @@ class TrackingService : Service() {
         )
     }
 
-    /** Text trạng thái + số điểm chờ, dùng chung để 2 nhánh không "giành" notification. */
-    private fun stateText(state: String): String =
-        String.format(java.util.Locale.US, "%s • %d điểm chờ gửi", state, db.count())
+    /**
+     * Text trạng thái cho notification thường trực.
+     *
+     * ⚠️ KHÔNG kèm số điểm chờ gửi: trước đây text là "<trạng thái> • N điểm chờ gửi" nên MỖI LẦN
+     * hàng đợi đổi (mất mạng là đổi liên tục) là notification được cập nhật lại ⇒ người dùng thấy
+     * nhấp nháy trong khay thông báo (đại vương báo 28/10). Text cố định thì updateNotificationText()
+     * tự bỏ qua, notification đứng yên hoàn toàn.
+     */
+    private fun stateText(state: String): String = state
 
     private fun updateNotificationText(text: String) {
         // Nội dung không đổi thì không gọi NotificationManager.notify lại.

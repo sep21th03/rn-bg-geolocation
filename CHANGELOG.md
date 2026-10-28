@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.10 — Thông báo Android ĐỨNG YÊN (hết nhấp nháy) + ghi chú chống báo sớm vùng nhỏ
+
+**Yêu cầu (28/10):** thông báo trên Android bị "spam" — nội dung nhấp nháy liên tục trong khay.
+
+**Nay:**
+
+- Thông báo thường trực của service **không còn kèm "N điểm chờ gửi"**. Trước đây text là
+  `"<trạng thái> • N điểm chờ gửi"` nên mỗi lần hàng đợi đổi (mất mạng là đổi liên tục) là
+  `NotificationManager.notify` được gọi lại ⇒ thấy nhấp nháy. Text nay cố định nên
+  `updateNotificationText()` tự bỏ qua ⇒ thông báo đứng yên. Muốn xem toạ độ sống thì đặt
+  `notificationLiveCoords: true` (mặc định tắt, và vẫn có giới hạn nhịp cập nhật).
+- Ghi chú trong `GeofenceReceiver.toFence()`: bán kính vùng đăng ký với Geofencing API của Android
+  có thể bị hệ điều hành nới lên **tối thiểu 100 m** ⇒ với vùng nhỏ hơn, ENTER của OS có thể bắn khi
+  người dùng còn NGOÀI bán kính thật. iOS đã tự chấm lại bán kính thật trước khi báo (xem
+  `BgGeo.swift`), **Android thì chưa** — nếu cần vùng nhỏ (<100 m) phải làm nốt phần này.
+
 ## 0.1.9 — `DeviceInfo.name` khớp `device_name` (cả 2 nền tảng) + chống chết app khi JS truyền sai
 
 **Yêu cầu:** app cần biết **tên máy** để đóng dấu vào dữ liệu riêng (bảng chấm công) sao cho trùng

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.11 — Thông báo geofence do APP tự đặt nội dung (lib không fix cứng nghiệp vụ)
+
+**Yêu cầu:** lib dùng cho nhiều app ⇒ **không fix cứng giá trị nào**; app phải tự đặt chữ và tự quyết
+định nghiệp vụ (chấm công là của app, lib chỉ định vị + bắn sự kiện).
+
+**Nay:**
+
+- Thông báo ENTER/EXIT/DWELL lấy nội dung từ `extras` của TỪNG VÙNG nếu app có đặt:
+  `extras.entryTitle`, `extras.exitTitle`, `extras.dwellTitle` (tiêu đề) và `extras.note` (dòng thêm).
+  Không đặt ⇒ giữ nguyên mặc định "Đã đến / Đã rời <tên vùng>" ⇒ **app đang dùng lib không bị ảnh hưởng**.
+- Log thêm kết quả HTTP vào file log (`http result: success=… status=… resp=…`) — cần cho việc chẩn đoán
+  khi app ở nền (event không tới JS thì chỉ log file mới cho biết lý do).
+- Không thêm hằng số/nghiệp vụ nào của app vào lib: toạ độ, URL server, bán kính, giờ ca, chữ thông báo
+  đều do app truyền vào (config/geofence).
+
+
 ## 0.1.10 — Thông báo Android ĐỨNG YÊN (hết nhấp nháy) + ghi chú chống báo sớm vùng nhỏ
 
 **Yêu cầu (28/10):** thông báo trên Android bị "spam" — nội dung nhấp nháy liên tục trong khay.

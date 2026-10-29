@@ -57,10 +57,19 @@ object GeofenceNotifier {
             val name = f.optString("name").ifEmpty {
                 f.optJSONObject("extras")?.optString("note").orEmpty().ifEmpty { identifier }
             }
+            // App TỰ ĐẶT nội dung qua `extras` của vùng (lib không biết nghiệp vụ):
+            //   extras.entryTitle / exitTitle / dwellTitle → tiêu đề thông báo
+            //   extras.note (đã hỗ trợ từ trước)           → dòng nội dung thêm
+            val ex = f.optJSONObject("extras")
+            val customTitle = when (action) {
+                1 -> ex?.optString("entryTitle").orEmpty()
+                2 -> ex?.optString("exitTitle").orEmpty()
+                else -> ex?.optString("dwellTitle").orEmpty()
+            }
             val (title, verb) = when (action) {
-                1 -> "Đã đến $name" to "vào"
-                2 -> "Đã rời $name" to "rời"
-                else -> "Đang ở $name" to "nán lại"
+                1 -> customTitle.ifEmpty { "Đã đến $name" } to "vào"
+                2 -> customTitle.ifEmpty { "Đã rời $name" } to "rời"
+                else -> customTitle.ifEmpty { "Đang ở $name" } to "nán lại"
             }
             val note = f.optJSONObject("extras")?.optString("note").orEmpty()
             val where = if (lat != null && lng != null) {

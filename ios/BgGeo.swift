@@ -328,6 +328,12 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
         }
         uploader.onResult = { [weak self] payload in
             self?.emit("rnbggeo:http", payload)
+            // Ghi kết quả HTTP vào log file: khi app ở nền JS không nhận được event, mà đây
+            // chính là chỗ duy nhất cho biết VÌ SAO điểm không lên được server (28/10: cần debug).
+            let ok = (payload["success"] as? Bool) ?? false
+            let st = (payload["status"] as? Int) ?? 0
+            let resp = String(((payload["response"] as? String) ?? "").prefix(160))
+            self?.log("http result: success=\(ok) status=\(st) resp=\(resp)")
         }
         uploader.onBody = { [weak self] body in
             let prefix = String(body.prefix(160))
@@ -563,7 +569,11 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
             ?? (payload["identifier"] as? String) ?? "vùng"
         let content = UNMutableNotificationContent()
         content.title = (config["notificationTitle"] as? String) ?? "bgGeoLab"
-        content.body = (enter ? "Đã đến " : "Đã rời ") + name
+        // App TỰ ĐẶT nội dung qua `extras` của vùng (lib không biết nghiệp vụ):
+        //   extras.entryTitle / exitTitle → tiêu đề;  extras.note → dòng thêm.
+        let ex = (payload["extras"] as? [String: Any]) ?? [:]
+        let custom = ((enter ? ex["entryTitle"] : ex["exitTitle"]) as? String) ?? ""
+        content.body = custom.isEmpty ? ((enter ? "Đã đến " : "Đã rời ") + name) : custom
         if let loc = payload["location"] as? [String: Any],
            let c = loc["coords"] as? [String: Any],
            let lat = c["latitude"] as? NSNumber, let lng = c["longitude"] as? NSNumber {

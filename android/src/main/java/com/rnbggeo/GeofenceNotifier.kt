@@ -23,8 +23,9 @@ import org.json.JSONObject
  * `identifier`. Nhờ vậy có thể đặt tên "Nhà", "Công ty" để sau này dùng cho
  * chấm công hoặc nhắc việc.
  *
- * Tắt toàn bộ bằng config `geofenceNotifications: false`; tắt từng vùng bằng
- * `notification: false` trong geofence đó.
+ * Tắt/MỞ toàn bộ bằng config `geofenceNotifications` — **MẶC ĐỊNH TẮT từ 0.1.12** (lib chỉ lấy vị
+ * trí + bắn sự kiện ENTER/EXIT + ghi hành trình; việc hiện thông báo là của APP). Tắt từng vùng
+ * bằng `notification: false` trong geofence đó.
  */
 object GeofenceNotifier {
 
@@ -34,7 +35,11 @@ object GeofenceNotifier {
     fun notify(ctx: Context, fence: JSONObject?, action: Int, lat: Double?, lng: Double?) {
         try {
             val cfg = Prefs.config(ctx)
-            if (!cfg.optBoolean("geofenceNotifications", true)) return
+            // MẶC ĐỊNH TẮT (từ 0.1.12): lib chỉ lấy vị trí + bắn sự kiện ENTER/EXIT + ghi hành trình;
+            // việc hiện thông báo là của APP (nội dung + navigation là của app). Bật `true` để dùng
+            // thông báo native — nó nổ được cả khi JS đã chết (app bị gạt khỏi recent), thứ mà JS
+            // không làm được vì lib không có headless task.
+            if (!cfg.optBoolean("geofenceNotifications", false)) return
             val f = fence ?: return
             if (!f.optBoolean("notification", true)) return
 

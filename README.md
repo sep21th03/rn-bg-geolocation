@@ -131,7 +131,7 @@ Full option list with JSDoc: [`types.d.ts`](types.d.ts).
 | `safetyGeofenceIntervalMinutes` | `5` | iOS: move the "last known position" geofence while moving |
 | `backgroundFetchIntervalMinutes` | `15` | iOS: background fetch interval (0 = off) |
 | `geofenceProximityRadius` | `1000` | Only fences within this radius are registered with the OS (iOS allows 20 regions) |
-| `geofenceNotifications` | `true` | System notification on geofence ENTER/EXIT |
+| `geofenceNotifications` | `false` | Lib tự hiện thông báo hệ thống khi vào/ra geofence. **Mặc định tắt từ 0.1.12** — lib chỉ lấy vị trí + bắn sự kiện ENTER/EXIT + ghi hành trình; việc hiện thông báo là của APP |
 | `insideWatchdogMinutes` | `10` | iOS: while parked inside a fence, take one coarse sample every N minutes |
 | `providerSilenceMinutes` | `3` | Android: no samples while moving → re-arm the provider and log a `gap` diag |
 | `elasticityMultiplier` | `1` | Android: distanceFilter follows speed |
@@ -174,7 +174,11 @@ await BackgroundGeolocation.ready({
   backgroundActivitySession: false, // no blue pill
   zeroLossMode: false,
   pauseInsideGeofence: true,        // no points while standing inside a fence
-  geofenceNotifications: true,
+  geofenceNotifications: false,     // default OFF: the LIB only locates + emits ENTER/EXIT + records
+                                    // the track. Showing a notification is the APP's job (custom text,
+                                    // navigation, business rules). Set true to let the lib post a
+                                    // native notification — it survives a dead JS context (Android
+                                    // swipe-away), which JS itself cannot do (no headless task here).
   distanceFilter: 10,
   url: 'https://your-server.com/locations',
 });

@@ -377,11 +377,24 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
         ]
     }
 
-    public override func startObserving() { hasListeners = true }
+    /// JS đăng ký listener xong → TRẢ LẠI các sự kiện VÙNG đã đệm trong lúc JS chưa sẵn sàng.
+    public override func startObserving() {
+        hasListeners = true
+        flushBufferedGeofenceEvents()
+    }
     public override func stopObserving() { hasListeners = false }
 
+    /// Sự kiện VÙNG bắn ra khi JS chưa đăng ký listener — xem emit().
+    private var bufferedGeofenceEvents: [(name: String, text: String, at: Date)] = []
+
+    /// Tuổi tối đa của sự kiện được đệm (giây) — config `eventBufferSeconds`, mặc định 600.
+    /// Sự kiện cũ hơn bị BỎ khi trả lại: một ENTER/EXIT từ vài tiếng trước không còn giá trị hành
+    /// động (app sẽ nhắc "chưa chấm ra ca" cho một buổi đã qua từ lâu). 0 = tắt hẳn việc đệm.
+    private var eventBufferSeconds: Double {
+        (config["eventBufferSeconds"] as? NSNumber)?.doubleValue ?? 600
+    }
+
     private func emit(_ name: String, _ body: Any) {
-        guard hasListeners else { return }
         // Lớp JS (index.js) đọc `e.payload` và tự JSON.parse — Android cũng bọc như vậy.
         // Bắn dict trần sẽ làm `e.payload` = undefined → app crash.
         let text: String
@@ -394,6 +407,26 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
         } else {
             text = "{}"
         }
+        // ⚠️ JS CHƯA đăng ký listener (app vừa được iOS ĐÁNH THỨC Ở NỀN, hoặc vừa khởi động nên
+        // React chưa mount tới chỗ `onGeofence`) ⇒ TRƯỚC ĐÂY BỎ LUÔN sự kiện.
+        //
+        // Đo thật 31/10/2026 (app chấm công, iPhone 11 Pro): EXIT Công ty lúc 11:38 — log native có
+        // "khôi phục theo dõi lúc khởi động (iOS đánh thức ở nền)" tức JS ĐÃ chạy — nhưng app KHÔNG
+        // hề nhận được sự kiện nên không phát thông báo "chưa chấm ra ca". Lý do: app gọi
+        // `await BgGeo.ready(...)` TRƯỚC khi đăng ký listener, mà ready() lại syncRegions() →
+        // didDetermineState/didExitRegion bắn sự kiện NGAY trong lúc đó ⇒ hasListeners còn false.
+        //
+        // Nay: ĐỆM sự kiện VÙNG rồi trả lại ở startObserving(). Các loại khác vẫn bỏ như cũ —
+        // đệm `location` sẽ làm JS nhận một loạt điểm cũ vô ích khi vừa mở app.
+        guard hasListeners else {
+            if name == "rnbggeo:geofence" { bufferGeofenceEvent(name, text) }
+            return
+        }
+        send(text, named: name)
+    }
+
+    /// Bắn một sự kiện (đã encode) sang JS — luôn trên main thread.
+    private func send(_ text: String, named name: String) {
         let payload: [String: Any] = ["payload": text]
         if Thread.isMainThread {
             sendEvent(withName: name, body: payload)
@@ -402,6 +435,29 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
                 self?.sendEvent(withName: name, body: payload)
             }
         }
+    }
+
+    private func bufferGeofenceEvent(_ name: String, _ text: String) {
+        let maxAge = eventBufferSeconds
+        guard maxAge > 0 else { return }
+        let now = Date()
+        bufferedGeofenceEvents.removeAll { now.timeIntervalSince($0.at) > maxAge }
+        bufferedGeofenceEvents.append((name, text, now))
+        // Trần cứng 20 sự kiện: đệm chỉ để bắc cầu vài giây lúc JS khởi động, không phải hàng đợi.
+        if bufferedGeofenceEvents.count > 20 {
+            bufferedGeofenceEvents.removeFirst(bufferedGeofenceEvents.count - 20)
+        }
+    }
+
+    private func flushBufferedGeofenceEvents() {
+        guard !bufferedGeofenceEvents.isEmpty else { return }
+        let now = Date()
+        let maxAge = eventBufferSeconds
+        let due = bufferedGeofenceEvents.filter { now.timeIntervalSince($0.at) <= maxAge }
+        bufferedGeofenceEvents.removeAll()
+        guard !due.isEmpty else { return }
+        log("đệm sự kiện vùng: trả \(due.count) sự kiện cho JS (chúng bắn lúc JS chưa đăng ký listener)")
+        for e in due { send(e.text, named: e.name) }
     }
 
     // MARK: - Vòng đời app & thông báo
@@ -512,18 +568,70 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
         }
     }
 
+    /// Delegate CŨ của UNUserNotificationCenter (thực tế là Notifee) — xem setupNotificationCenter().
+    private weak var previousNotificationDelegate: UNUserNotificationCenterDelegate?
+
+    /// Trạng thái thông báo đã áp lần cuối (nil = chưa biết). Chỉ ghi log khi TRẠNG THÁI ĐỔI, vì
+    /// setupNotificationCenter() được gọi ở init/ready/setConfig/reset.
+    private var notificationStateApplied: Bool?
+
     /**
      Đăng ký thông báo hệ thống cho geofence (bản iOS trước đây KHÔNG có gì).
 
      Android đã có GeofenceNotifier (thông báo khi vào/ra vùng); iOS thiếu hoàn toàn nên
      "lúc đến geofence không thấy thông báo". Quyền thông báo phải được người dùng đồng ý
      → hỏi một lần khi module khởi tạo (chỉ khi trạng thái còn là .notDetermined).
+
+     ⚠️ VÌ SAO PHẢI GIÀNH delegate (sửa 31/10/2026 — lỗi "iOS không có thông báo khi vào geo"):
+     thông báo tạo lúc app đang MỞ chỉ được hiện nếu `UNUserNotificationCenter.delegate` gọi
+     completionHandler trong `willPresent`. Trước đây ta chỉ nhận delegate khi chỗ đó còn
+     TRỐNG (`if center.delegate == nil`), nhưng Notifee (app dùng Notifee) đã giành delegate
+     NGAY LÚC KHỞI ĐỘNG: nó `observe` trong `UIApplicationDidFinishLaunchingNotification` —
+     TRƯỚC khi JS chạy và trước `init()` của module này. Notifee ghi lại delegate cũ
+     (`_originalDelegate`) ngay lúc đó, mà lúc đó chưa ai giữ ⇒ nil; và `willPresent` của
+     Notifee với thông báo KHÔNG do nó tạo thì rơi vào nhánh
+     `else if (_originalDelegate != nil && …)` ⇒ KHÔNG gọi completionHandler ⇒ iOS bỏ thông
+     báo (Apple: "if the handler is not called in a timely manner then the notification will
+     not be presented"). Đo thật 31/10 (log máy): 23/27 thông báo đặt lúc app ở NỀN thì hiện,
+     còn 4/4 thông báo đặt lúc app đang MỞ thì mất hút (đúng 3 lần test "vào geo" buổi sáng).
+     ⇒ Nay NHẬN delegate kể cả khi đã có chủ, và CHUYỂN TIẾP mọi thứ không phải của ta
+     (thông báo của Notifee + sự kiện bấm) cho delegate cũ ⇒ Notifee vẫn chạy đúng.
      */
     private func setupNotificationCenter() {
-        guard (config["geofenceNotifications"] as? Bool) ?? true else { return }
         let center = UNUserNotificationCenter.current()
-        // Để thông báo vẫn hiện khi app đang mở (mặc định iOS giấu).
-        if center.delegate == nil { center.delegate = self }
+        // MẶC ĐỊNH TẮT (0.1.12): lib chỉ lấy vị trí + bắn sự kiện ENTER/EXIT + ghi hành trình; việc
+        // hiện thông báo là của APP. Tắt ở đây cũng có nghĩa lib KHÔNG đụng tới
+        // `UNUserNotificationCenter.delegate` ⇒ không tranh chấp với Notifee/thư viện khác.
+        let wanted = (config["geofenceNotifications"] as? Bool) ?? false
+        let changed = notificationStateApplied != wanted
+
+        guard wanted else {
+            // TẮT: nếu TA đang giữ delegate thì phải TRẢ LẠI cho chủ cũ — đừng giữ delegate mà không
+            // dùng. Ca thật gặp 31/10: config đã lưu của bản cũ là `true` nên init() giành delegate,
+            // rồi ready() đọc `false`; không trả lại thì lib giữ delegate suốt phiên dù đã tắt.
+            if center.delegate is BgGeo {
+                center.delegate = previousNotificationDelegate
+                let who = previousNotificationDelegate.map { String(describing: type(of: $0)) } ?? "nil"
+                previousNotificationDelegate = nil
+                diag("config", "thông báo: TẮT (geofenceNotifications=false) — TRẢ "
+                     + "UNUserNotificationCenter delegate về \(who)")
+            } else if changed {
+                diag("config", "thông báo: TẮT (geofenceNotifications=false) — lib chỉ bắn sự kiện "
+                     + "ENTER/EXIT, không giành delegate của app")
+            }
+            notificationStateApplied = false
+            return
+        }
+
+        // BẬT: nhận delegate (KHÔNG chỉ khi trống) để thông báo hiện được cả khi app đang mở.
+        let current = center.delegate
+        if !(current is BgGeo) {
+            previousNotificationDelegate = current
+            center.delegate = self
+            let who = previousNotificationDelegate.map { String(describing: type(of: $0)) } ?? "nil"
+            diag("config", "thông báo: nhận UNUserNotificationCenter delegate (chủ cũ: \(who))")
+        }
+        notificationStateApplied = true
         center.getNotificationSettings { settings in
             guard settings.authorizationStatus == .notDetermined else { return }
             center.requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] granted, _ in
@@ -533,15 +641,69 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
     }
 
     /// Hiện thông báo khi app đang foreground (iOS giấu mặc định).
+    ///
+    /// - Thông báo CỦA TA (`rnbggeo-fence-…`): tự hiện (banner + âm thanh + vào danh sách).
+    /// - Mọi thông báo khác (Notifee / thư viện khác): chuyển tiếp nguyên cho delegate cũ —
+    ///   Notifee tự quyết định theo `ios.foregroundPresentationOptions`. Không ai nhận thì
+    ///   gọi `completionHandler([])` để iOS không phải chờ (chờ = thông báo bị bỏ).
     public func userNotificationCenter(_ center: UNUserNotificationCenter,
                                        willPresent notification: UNNotification,
                                        withCompletionHandler completionHandler:
                                        @escaping (UNNotificationPresentationOptions) -> Void) {
-        if #available(iOS 14.0, *) {
-            completionHandler([.banner, .sound])
-        } else {
-            completionHandler([.alert, .sound])
+        if notification.request.identifier.hasPrefix("rnbggeo-fence-") {
+            if #available(iOS 14.0, *) {
+                completionHandler([.banner, .list, .sound])
+            } else {
+                completionHandler([.alert, .sound])
+            }
+            return
         }
+        guard let prev = previousNotificationDelegate,
+              prev.responds(to: #selector(userNotificationCenter(_:willPresent:withCompletionHandler:)))
+        else {
+            completionHandler([])
+            return
+        }
+        prev.userNotificationCenter?(center, willPresent: notification,
+                                     withCompletionHandler: completionHandler)
+    }
+
+    /// Người dùng BẤM vào thông báo.
+    ///
+    /// - Thông báo CỦA TA (`rnbggeo-fence-…`): xử lý NGAY tại đây rồi `completionHandler()`,
+    ///   KHÔNG chuyển tiếp. Chuyển tiếp thì Notifee coi đây là thông báo "lạ" (không có
+    ///   `kNotifeeUserInfoNotification`): nó parse lại thành thông báo Notifee, phát một sự kiện
+    ///   PRESS mà app không hề đăng ký (`onForegroundEvent` không dùng ở app này), rồi mới gọi
+    ///   `completionHandler` sau **15 giây** (`dispatch_after(…, 15 * NSEC_PER_SEC, …)` trong
+    ///   NotifeeCore+UNUserNotificationCenter.m) ⇒ iOS phải chờ handler vô ích.
+    /// - Mọi thông báo khác (của Notifee): chuyển tiếp nguyên cho delegate cũ ⇒ app vẫn nhận đủ
+    ///   `onForegroundEvent`/`onBackgroundEvent` (Notifee chỉ nghe được qua chính delegate này).
+    public func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                       didReceive response: UNNotificationResponse,
+                                       withCompletionHandler completionHandler: @escaping () -> Void) {
+        if response.notification.request.identifier.hasPrefix("rnbggeo-fence-") {
+            log("thông báo geofence: người dùng bấm \"\(response.notification.request.content.body)\"")
+            completionHandler()
+            return
+        }
+        guard let prev = previousNotificationDelegate,
+              prev.responds(to: #selector(userNotificationCenter(_:didReceive:withCompletionHandler:)))
+        else {
+            completionHandler()
+            return
+        }
+        prev.userNotificationCenter?(center, didReceive: response,
+                                     withCompletionHandler: completionHandler)
+    }
+
+    /// Nút "Settings" trên thông báo (iOS 12+) — chuyển tiếp cho delegate cũ.
+    @available(iOS 12.0, *)
+    public func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                       openSettingsFor notification: UNNotification?) {
+        guard let prev = previousNotificationDelegate,
+              prev.responds(to: #selector(userNotificationCenter(_:openSettingsFor:)))
+        else { return }
+        prev.userNotificationCenter?(center, openSettingsFor: notification)
     }
 
     /**
@@ -549,7 +711,7 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
      Tôn trọng `geofenceNotifications` (chung) và notifyOnEntry/notifyOnExit (từng vùng).
      */
     private func notifyGeofence(_ payload: [String: Any], enter: Bool, initial: Bool = false) {
-        guard (config["geofenceNotifications"] as? Bool) ?? true else { return }
+        guard (config["geofenceNotifications"] as? Bool) ?? false else { return }
         // ENTER kiểu "đang ở trong vùng lúc mở app / lúc vừa tạo vùng" KHÔNG phải "vừa đến"
         // → không báo. Trước 22/10 mỗi lần mở app lại nhận 1 thông báo "Đã đến <tên>"
         // (do didDetermineState trả .inside) dù không hề đi đâu.
@@ -632,12 +794,15 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
             "startOnBoot": false,
             "headers": [String: String](),
             "pauseInsideGeofence": false,
-            // iOS: thông báo hệ thống khi vào/ra vùng.
-            "geofenceNotifications": true,
+            // MẶC ĐỊNH TẮT (từ 0.1.12): lib chỉ lo lấy vị trí chính xác + bắn sự kiện ENTER/EXIT +
+            // ghi hành trình. Việc hiện thông báo là của APP (nội dung + navigation + nghiệp vụ).
+            "geofenceNotifications": false,
             // iOS: "always" = báo cả khi app ở nền/đang đóng; "foreground" = chỉ báo khi app
             // đang mở. ENTER kiểu "đang ở trong vùng lúc mở app / lúc tạo vùng" LUÔN không báo.
             "geofenceNotificationMode": "always",
             "geofenceInitialTriggerEntry": true,
+            // Đệm sự kiện VÙNG khi JS chưa đăng ký listener (giây) — xem emit() trong BgGeo.swift.
+            "eventBufferSeconds": 600,
             "zeroLossMode": false,
             // iOS: giữ GPS thô 100 m khi đứng yên thay vì tắt hẳn. Mặc định FALSE để
             // KHÔNG hiện mũi tên vị trí trên status bar khi máy đang đứng yên (người
@@ -782,6 +947,10 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
         saveConfig()
         applyLocationSettings()
         applyBackgroundFetchInterval()
+        // Config có thể vừa bật `geofenceNotifications` qua ready() → phải GIÀNH LẠI delegate ngay:
+        // init() chạy TRƯỚC ready() với giá trị mặc định (false), nên nếu không gọi ở đây thì
+        // thông báo đặt lúc app đang MỞ sẽ bị iOS nuốt (xem setupNotificationCenter). Idempotent.
+        setupNotificationCenter()
         BgGeoGeofences.shared.syncRegions(with: lm)
         // Khôi phục trạng thái bật/tắt đã lưu (nếu stopOnTerminate = false).
         resumeIfNeeded()
@@ -933,6 +1102,8 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
         saveConfig()
         applyLocationSettings()
         applyBackgroundFetchInterval()
+        // Bật/tắt `geofenceNotifications` lúc đang chạy → giành lại delegate ngay, cùng lý do như ready().
+        setupNotificationCenter()
         if enabled { startUpdating() }
         warnUnsupportedConfig()
         resolve(jsonString(state()))
@@ -953,6 +1124,8 @@ public class BgGeo: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificati
         }
         saveConfig()
         applyLocationSettings()
+        // reset() dựng lại config từ đầu → phải xét lại việc giành delegate thông báo.
+        setupNotificationCenter()
         resolve(jsonString(state()))
     }
 

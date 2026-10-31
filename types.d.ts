@@ -284,7 +284,17 @@ export interface Config {
   geofenceProximityRadius?: number;
   /** true = thêm vùng đa giác khi đang đứng trong vùng thì bắn ENTER ngay. Mặc định true. */
   geofenceInitialTriggerEntry?: boolean;
-  /** true = bật thông báo hệ thống khi vào/ra geofence. Mặc định true. */
+  /**
+   * true = lib tự hiện thông báo hệ thống khi vào/ra geofence. **Mặc định false** (từ 0.1.12).
+   *
+   * Lib chỉ lo lấy vị trí chính xác + bắn sự kiện ENTER/EXIT + ghi hành trình; việc hiện thông báo
+   * là của APP, vì nội dung, navigation/deep-link và nghiệp vụ là chuyện của app.
+   *
+   * Bật `true` khi cần thông báo nổ **lúc JS đã chết** (Android: app bị gạt khỏi recent — lib không
+   * có headless task nên JS không chạy). Nội dung lấy từ `extras.entryTitle`/`extras.exitTitle`
+   * của từng vùng. Trên iOS, gạt app khỏi đa nhiệm thì KHÔNG cách nào nổ (hệ điều hành không
+   * relaunch app) — nên iOS thường không cần bật.
+   */
   geofenceNotifications?: boolean;
 
   /**
@@ -297,6 +307,18 @@ export interface Config {
    * lần mở app lại có thông báo "Đã đến <tên vùng>".
    */
   geofenceNotificationMode?: 'always' | 'foreground';
+
+  /**
+   * Đệm sự kiện VÙNG khi JS chưa đăng ký listener (giây). **Mặc định 600.**
+   *
+   * Cần thiết vì app thường `await ready()` TRƯỚC khi đăng ký `onGeofence`, mà `ready()` lại đăng ký
+   * lại vùng ⇒ sự kiện bắn ngay trong lúc đó, khi JS chưa sẵn sàng. Không đệm thì sự kiện bị MẤT
+   * (đo thật 31/10/2026: EXIT lúc 11:38 không tới được app ⇒ không có thông báo).
+   *
+   * Sự kiện cũ hơn ngưỡng bị BỎ khi trả lại — một ENTER/EXIT từ vài tiếng trước không còn giá trị
+   * hành động. `0` = tắt hẳn việc đệm.
+   */
+  eventBufferSeconds?: number;
 
   /**
    * iOS: nhịp gửi diag `alive` lên `<url>/diag` (phút). Mặc định 15, 0 = tắt.

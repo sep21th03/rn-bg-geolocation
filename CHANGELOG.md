@@ -1,5 +1,105 @@
 # Changelog
 
+## 0.1.12 — iOS: GIÀNH UNUserNotificationCenter delegate + MẶC ĐỊNH TẮT thông báo native
+
+### 0.1.12a — ĐỔI MẶC ĐỊNH: `geofenceNotifications` = **false**
+
+**Quyết định (31/10/2026):** lib chỉ lo **lấy vị trí chính xác + bắn sự kiện ENTER/EXIT + ghi hành
+trình**. Việc hiện thông báo là **của APP** — vì nội dung thông báo, navigation/deep-link khi bấm, và
+nghiệp vụ ("đã chấm công chưa", giờ ca, nhắc trước/sau ca…) đều là chuyện của app; lib generic không
+biết và không nên biết.
+
+Đổi ở cả 3 tầng (mặc định phải khớp nhau, nếu không thì nền tảng này tắt còn nền tảng kia bật):
+
+| Tầng | Trước | Sau |
+|---|---|---|
+| `index.js` `defaultConfig()` | `true` | **`false`** |
+| `ios/BgGeo.swift` `defaultConfig()` | `true` | **`false`** |
+| `ios/BgGeo.swift` guard trong `setupNotificationCenter()` / `notifyGeofence()` | `?? true` | **`?? false`** |
+| `android/GeofenceNotifier.kt` | `optBoolean(…, true)` | **`optBoolean(…, false)`** |
+
+Hệ quả tích cực: mặc định lib **không đụng tới `UNUserNotificationCenter.delegate`** ⇒ không còn tranh
+delegate với Notifee, và cũng **không tự xin quyền thông báo** (app tự lo qua Notifee).
+
+**Kèm sửa một lỗ hổng liên quan:** `ready()`, `setConfig()`, `reset()` trước đây **không** gọi
+`setupNotificationCenter()`. Vì `init()` chạy TRƯỚC `ready()`, app bật `geofenceNotifications: true`
+qua `ready()` sẽ **không bao giờ giành được delegate** ⇒ thông báo đặt lúc app đang MỞ bị iOS nuốt
+(đúng lỗi 0.1.12b mô tả ở dưới, nhưng quay lại âm thầm). Nay cả 3 hàm đều gọi lại
+`setupNotificationCenter()` (idempotent: đã giữ delegate thì không làm gì).
+
+**Và: TẮT thì TRẢ LẠI delegate.** Trước đây khi `geofenceNotifications` chuyển `true → false` (hoặc khi
+config ĐÃ LƯU của bản cũ là `true` mà config mới là `false`), lib chỉ dừng phát thông báo nhưng **vẫn giữ
+`UNUserNotificationCenter.delegate` suốt phiên** — Notifee/thư viện khác phải đi vòng qua lib một cách vô
+ích. Đo thật trên iPhone 11 Pro 31/10: log `09:15:18.115 … nhận delegate` (init, config lưu cũ = true)
+rồi `09:15:18.265 … TẮT`. Nay khi tắt, lib **gán trả `previousNotificationDelegate`** và log
+`thông báo: TẮT … TRẢ UNUserNotificationCenter delegate về <tên lớp cũ>`. Log cũng chỉ ghi khi trạng thái
+ĐỔI (`notificationStateApplied`) nên không lặp ở init/ready/setConfig/reset.
+
+⚠️ **Ai đang dùng lib:** `bgGeoLab` không set `geofenceNotifications` ⇒ **thông báo của lab sẽ tắt
+theo**. Muốn test thông báo native thì bật tường minh `geofenceNotifications: true`.
+
+### 0.1.12c — ĐỆM sự kiện VÙNG khi JS chưa đăng ký listener (lỗi "app không nhận được sự kiện")
+
+**Lỗi (đo thật 31/10/2026, app chấm công, iPhone 11 Pro):** EXIT Công ty lúc **11:38** — log native có
+`khôi phục theo dõi lúc khởi động (iOS đánh thức ở nền)` (tức JS ĐÃ chạy) và có `diag geofence: EXIT Công
+ty` — nhưng **app không hề nhận được sự kiện** nên không phát thông báo "chưa chấm ra ca". Server vì vậy
+**thiếu mốc RA CA ca sáng**.
+
+**Gốc:** `emit()` có `guard hasListeners else { return }` — **bỏ luôn sự kiện**, không đệm. App thường
+gọi `await BgGeo.ready(...)` TRƯỚC khi đăng ký `onGeofence` (để lấy config về trước), mà `ready()` lại
+`syncRegions()` ⇒ `didDetermineState`/`didExitRegion` bắn sự kiện **ngay trong lúc đó**, khi React chưa
+mount tới chỗ đăng ký listener ⇒ `hasListeners` còn `false` ⇒ sự kiện mất.
+
+**Nay:** sự kiện `rnbggeo:geofence` bắn lúc chưa có listener được **ĐỆM** lại và **TRẢ về JS ở
+`startObserving()`**. Chỉ đệm sự kiện VÙNG (đệm `location` sẽ làm JS nhận một loạt điểm cũ vô ích).
+
+- Config `eventBufferSeconds` (**mặc định 600**; `0` = tắt, quay lại hành vi cũ). Sự kiện cũ hơn ngưỡng
+  bị BỎ khi trả lại — ENTER/EXIT từ vài tiếng trước không còn giá trị hành động.
+- Trần cứng 20 sự kiện (đệm chỉ để bắc cầu vài giây lúc JS khởi động, không phải hàng đợi).
+- Log khi trả: `đệm sự kiện vùng: trả N sự kiện cho JS (chúng bắn lúc JS chưa đăng ký listener)`.
+
+**Kiểm chứng trên máy (31/10, log 14:01:50):** buộc app chuẩn hoá lại vùng lúc khởi động ⇒
+
+```
+14:01:50.388 diag geofence: ENTER Công ty (đang ở trong vùng lúc đăng ký)     ← bắn lúc JS chưa nghe
+14:01:50.618 đệm sự kiện vùng: trả 1 sự kiện cho JS (chúng bắn lúc JS chưa đăng ký listener)
+```
+
+⇒ 230 ms sau, sự kiện được trả về JS. Trước bản vá, sự kiện này **mất hẳn**.
+
+### 0.1.12b — iOS: thông báo geofence hiện cả khi app đang mở
+
+**Lỗi (đo thật 31/10/2026, app chấm công + Notifee):** iOS "không có thông báo khi vào geo" —
+thông báo ENTER/EXIT đặt lúc app **đang mở** thì mất hút, còn đặt lúc app ở **nền** thì hiện bình thường.
+
+**Gốc:** thông báo tạo khi app đang mở chỉ được hiện nếu `UNUserNotificationCenter.delegate` gọi
+`completionHandler` trong `willPresent`. Bản cũ chỉ nhận delegate khi chỗ đó còn TRỐNG
+(`if center.delegate == nil { center.delegate = self }`), nhưng **Notifee đã giành delegate ngay lúc
+khởi động**: nó `observe` trong `UIApplicationDidFinishLaunchingNotification` — TRƯỚC khi JS chạy và
+trước `init()` của module. Lúc đó `_originalDelegate` của Notifee = nil, nên `willPresent` của Notifee
+với thông báo **không phải của nó** rơi vào nhánh `else if (_originalDelegate != nil && …)` ⇒ **không
+gọi completionHandler** ⇒ iOS bỏ thông báo (Apple: *"if the handler is not called in a timely manner
+then the notification will not be presented"*).
+
+**Nay:**
+
+- `setupNotificationCenter()` **nhận** delegate kể cả khi đã có chủ, ghi nhớ chủ cũ vào
+  `previousNotificationDelegate`, và log 1 dòng diag: `thông báo: nhận UNUserNotificationCenter
+  delegate (chủ cũ: <tên lớp>)` ⇒ đọc log là biết ai đang giữ delegate.
+- `willPresent`: thông báo **của lib** (`rnbggeo-fence-…`) → tự hiện `[.banner, .list, .sound]`;
+  mọi thông báo khác → **chuyển tiếp nguyên** cho chủ cũ (Notifee tự quyết theo
+  `ios.foregroundPresentationOptions`); không ai nhận thì `completionHandler([])` (không để iOS chờ).
+- Thêm `didReceive response:` và `openSettingsFor notification:`. Thông báo **của lib** thì xử lý
+  ngay tại chỗ (`completionHandler()` liền + 1 dòng log), **không** đẩy sang chủ cũ: đẩy sang thì
+  Notifee coi là thông báo "lạ", phát một sự kiện PRESS không ai nghe rồi mới gọi `completionHandler`
+  sau **15 giây** (`dispatch_after(…, 15 * NSEC_PER_SEC, …)` trong `NotifeeCore+UNUserNotificationCenter.m`).
+  Mọi thông báo **khác** (của Notifee) vẫn **chuyển tiếp nguyên** cho chủ cũ ⇒ app không mất
+  `onForegroundEvent`/`onBackgroundEvent`.
+
+**Kiểm chứng (log máy iPhone 11 Pro):** trước khi sửa 23/27 thông báo hiện (đặt lúc ở nền), 4/4 thông
+báo đặt lúc app đang mở bị bỏ. Sau khi sửa: log có dòng "nhận UNUserNotificationCenter delegate
+(chủ cũ: NotifeeCoreUNUserNotificationCenter)".
+
 ## 0.1.11 — Thông báo geofence do APP tự đặt nội dung (lib không fix cứng nghiệp vụ)
 
 **Yêu cầu:** lib dùng cho nhiều app ⇒ **không fix cứng giá trị nào**; app phải tự đặt chữ và tự quyết

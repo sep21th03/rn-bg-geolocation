@@ -258,8 +258,19 @@ const defaultConfig = {
   // --- geofencing ---
   geofenceProximityRadius: 1000, // m — chỉ nạp vùng trong bán kính này → không giới hạn số vùng
   geofenceInitialTriggerEntry: true, // đang ở trong vùng khi thêm → bắn ENTER ngay
-  geofenceNotifications: true, // bật thông báo hệ thống khi vào/ra vùng
+  // MẶC ĐỊNH TẮT (từ 0.1.12): lib chỉ lo LẤY VỊ TRÍ CHÍNH XÁC + BẮN SỰ KIỆN ENTER/EXIT + GHI HÀNH TRÌNH.
+  // Việc hiện thông báo là của APP — nội dung, navigation/deep-link và nghiệp vụ ("đã chấm công chưa",
+  // giờ ca…) đều là chuyện của app, lib generic không biết. Bật `true` nếu muốn lib tự hiện thông báo
+  // native (đặt nội dung qua `extras.entryTitle`/`exitTitle`); chế độ đó nổ được cả khi JS đã chết —
+  // thực tế chỉ Android cần, vì iOS không relaunch app sau khi user gạt app khỏi đa nhiệm.
+  geofenceNotifications: false,
   geofenceNotificationMode: 'always', // iOS: 'always' = báo cả khi app ở nền/đang đóng; 'foreground' = chỉ báo khi app đang mở. ENTER "đang ở trong vùng lúc mở app / lúc tạo vùng" LUÔN không báo.
+  // ĐỆM SỰ KIỆN VÙNG khi JS chưa đăng ký listener (giây). Bắt buộc phải có vì app thường gọi
+  // `await ready()` TRƯỚC khi đăng ký `onGeofence`, mà ready() lại syncRegions() → sự kiện bắn ngay
+  // lúc đó; nếu bỏ thì app mất sự kiện (đo thật 31/10: EXIT lúc 11:38 app không hề nhận được).
+  // Sự kiện cũ hơn ngưỡng này bị BỎ khi trả lại (ENTER/EXIT từ vài tiếng trước không còn giá trị
+  // hành động). 0 = tắt hẳn việc đệm (quay lại hành vi cũ: mất sự kiện).
+  eventBufferSeconds: 600,
   aliveIntervalMinutes: 15, // iOS: nhịp gửi diag "alive" lên /diag (phút), giống Android 15 phút/lần; 0 = tắt. Nhờ nó biết app còn sống hay đã bị iOS treo/giết.
   insideWatchdogMinutes: 10, // iOS: khi đã tạm dừng vì đứng yên TRONG vùng, cứ N phút lấy 1 mẫu thô để biết còn trong vùng hay đã đi (giống Android); 0 = tắt.
   providerSilenceMinutes: 3, // WATCHDOG "nhà cung cấp vị trí im lặng" (Android): đang di chuyển mà KHÔNG nhận được mẫu nào trong N phút → ghi diag "gap" lên server + đăng ký lại request + gọi getCurrentLocation một lần để "đá" provider. Đo thật 23/10: SM-A127F im lặng 10 phút, mất 4,8 km. 0 = tắt.
